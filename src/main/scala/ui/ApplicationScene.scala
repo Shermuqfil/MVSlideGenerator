@@ -56,6 +56,109 @@ class ApplicationScene(implicit stage: Stage, rc: RunConfig) extends GridPane {
   }
 
   // We want both panes to scroll simultaneously
+  // A snapshot holds both languages so undo/redo cannot desynchronise row numbers.
+  private type LyricSnapshot = (List[String], List[String])
+  private val lyricUndoHistory = scala.collection.mutable.Stack.empty[LyricSnapshot]
+  private val lyricRedoHistory = scala.collection.mutable.Stack.empty[LyricSnapshot]
+  private var restoringLyrics = false
+
+  private def lyricSnapshot(): LyricSnapshot =
+    (englishFileArea.getLines, japaneseFileArea.getLines)
+
+  def recordLyricChange(): Unit = {
+    if (!restoringLyrics) {
+      lyricUndoHistory.push(lyricSnapshot())
+      lyricRedoHistory.clear()
+    }
+  }
+
+  def clearLyricHistory(): Unit = {
+    lyricUndoHistory.clear()
+    lyricRedoHistory.clear()
+  }
+
+  private def restoreLyricSnapshot(snapshot: LyricSnapshot): Unit = {
+    restoringLyrics = true
+    try {
+      englishFileArea.fileContents.getItems.setAll(snapshot._1: _*)
+      japaneseFileArea.fileContents.getItems.setAll(snapshot._2: _*)
+    } finally restoringLyrics = false
+    refreshLyricLists(0)
+  }
+
+  def undoLyricChange(): Unit = if (lyricUndoHistory.nonEmpty) {
+    val previous = lyricUndoHistory.pop()
+    lyricRedoHistory.push(lyricSnapshot())
+    restoreLyricSnapshot(previous)
+  }
+
+  def redoLyricChange(): Unit = if (lyricRedoHistory.nonEmpty) {
+    val following = lyricRedoHistory.pop()
+    lyricUndoHistory.push(lyricSnapshot())
+    restoreLyricSnapshot(following)
+  }
+
+  // English creates a linked pair. Japanese may fill an EXISTING blank partner only.
+  def splitLyricLine(source: FileDisplayPane, index: Int, left: String, right: String): Unit = {
+    val english = englishFileArea.fileContents.getItems
+    val japanese = japaneseFileArea.fileContents.getItems
+    if (index < 0) return
+
+    if (source eq englishFileArea) {
+      if (index >= english.size() || index >= japanese.size()) return
+      recordLyricChange()
+      english.set(index, left)
+      english.add(index + 1, right)
+      japanese.add(index + 1, "")
+      refreshLyricLists(index)
+    } else if (source eq japaneseFileArea) {
+      // Split only where an English split has already provided an empty Japanese slot.
+      if (index + 1 >= japanese.size() || index + 1 >= english.size()) return
+      if (!japanese.get(index + 1).trim.isEmpty) return
+      if (english.get(index).trim.isEmpty || english.get(index + 1).trim.isEmpty) return
+      recordLyricChange()
+      japanese.set(index, left)
+      japanese.set(index + 1, right)
+      refreshLyricLists(index)
+    }
+  }
+
+  // Merging from English combines the paired rows in both columns.
+  def mergeLyricLine(source: FileDisplayPane, index: Int): Unit = {
+    if (!(source eq englishFileArea)) return
+    val english = englishFileArea.fileContents.getItems
+    val japanese = japaneseFileArea.fileContents.getItems
+    if (index < 0 || index + 1 >= english.size() || index + 1 >= japanese.size()) return
+    recordLyricChange()
+    english.set(index, (english.get(index).trim + " " + english.get(index + 1).trim).trim)
+    japanese.set(index, japanese.get(index) + japanese.get(index + 1))
+    english.remove(index + 1)
+    japanese.remove(index + 1)
+    refreshLyricLists(index)
+  }
+
+  // Highlight only actual empty rows and the row immediately BEFORE each one.
+  // Never keep stale red flags after rows have been filled.
+  def isUnpairedLine(index: Int): Boolean = {
+    val english = englishFileArea.fileContents.getItems
+    val japanese = japaneseFileArea.fileContents.getItems
+    def blankAt(i: Int): Boolean = {
+      if (i < 0) false
+      else if (i >= english.size() && i >= japanese.size()) false
+      else if (i >= english.size() || i >= japanese.size()) true
+      else english.get(i).trim.isEmpty || japanese.get(i).trim.isEmpty
+    }
+    blankAt(index) || blankAt(index + 1)
+  }
+
+  def refreshLyricHighlights(index: Int): Unit = refreshLyricLists(index)
+
+  private def refreshLyricLists(index: Int): Unit = {
+    englishFileArea.fileContents.refresh()
+    japaneseFileArea.fileContents.refresh()
+    setPreviewImage(index)
+  }
+
   def tryLinkingScrolls(): Unit = {
     (japaneseFileArea.getScrollbar, englishFileArea.getScrollbar) match {
       case (Some(jsb), Some(esb)) => jsb.valueProperty().bindBidirectional(esb.valueProperty())

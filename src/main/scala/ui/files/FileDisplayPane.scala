@@ -53,7 +53,17 @@ class FileDisplayPane(labelText: String, val parent: ApplicationScene, allowSpli
   }
 
   // These are the two components mainly responsible for manipulating the exposed properties
-  val fileContents: FileContentArea = new FileContentArea(parent.setPreviewImage)
+  val fileContents: FileContentArea = new FileContentArea(
+    parent.setPreviewImage,
+    (i, left, right) => parent.splitLyricLine(this, i, left, right),
+    i => parent.mergeLyricLine(this, i),
+    i => parent.isUnpairedLine(i),
+    labelText.toLowerCase.contains("english"),
+    () => parent.recordLyricChange(),
+    i => parent.refreshLyricHighlights(i),
+    () => parent.undoLyricChange(),
+    () => parent.redoLyricChange()
+  )
   _lines.bind(fileContents.itemsProperty())
 
   // The row below the list of lines which allows user interaction
@@ -80,6 +90,8 @@ class FileDisplayPane(labelText: String, val parent: ApplicationScene, allowSpli
         tryWithResource(Source.fromFile(file, "UTF-8")) { textSource =>
           fileContents.getItems.setAll(textSource.getLines().map(_.trim).toList: _*)
         }
+        parent.clearLyricHistory()
+        parent.refreshLyricHighlights(0)
         parent.tryLinkingScrolls()
         if(!_fontSpinner.isVisible) {
           _fontSpinner.setVisible(true)
