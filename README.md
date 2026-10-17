@@ -1,3 +1,5 @@
+Update: Adding some line editing features to better map lyrics within the program, instead of playing pingpong in textfiles. 
+
 # MVSlideGenerator
 A GUI application built to facilitate the making of slides for lyric videos. More specifically, English/Japanese lyric videos.
 
